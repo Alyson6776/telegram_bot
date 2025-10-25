@@ -1,10 +1,7 @@
-import threading
-from keep_alive import keep_alive
 from bot import run_bot
+from keep_alive import keep_alive
 import asyncio
 
-def run_flask():
+if __name__ == "__main__":
     keep_alive()
-
-threading.Thread(target=run_flask).start()
-asyncio.run(run_bot())
+    asyncio.run(run_bot())
