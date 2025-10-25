@@ -1,88 +1,149 @@
 import logging
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
+from telegram import (
+    Update,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+)
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    filters,
+    ContextTypes,
+)
 import json
 import os
 
+# ==============================
+# CONFIG
+# ==============================
 BOT_TOKEN = "7650403137:AAF5m8TXWpApivJVSwsX7tX1YkNXlB8g09A"
-GROUP_ID = -1001234567890  # Replace with your group ID
+INVITE_FILE = "invites.json"
+GROUP_NAME = "🧧Kaki free credit🧧"
 
-# Enable logging
-logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
+# ==============================
+# LOGGING SETUP
+# ==============================
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+)
 logger = logging.getLogger(__name__)
 
-INVITE_FILE = "invites.json"
-
-# Load invite data
+# ==============================
+# LOAD INVITE DATA
+# ==============================
 def load_invites():
     if os.path.exists(INVITE_FILE):
         with open(INVITE_FILE, "r") as f:
             return json.load(f)
     return {}
 
-# Save invite data
 def save_invites(data):
     with open(INVITE_FILE, "w") as f:
-        json.dump(data, f)
+        json.dump(data, f, indent=4)
 
 invites = load_invites()
 
+# ==============================
+# START COMMAND
+# ==============================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
-    if not user:
-        return
-
     user_id = str(user.id)
+    user_name = user.first_name or "kawan"
+
     if user_id not in invites:
-        invites[user_id] = {"invited": 0}
+        invites[user_id] = {"invited": []}
         save_invites(invites)
 
-    text = (
-        "👋 Welcome!\n\n"
-        "To get started, please invite **3 friends** to this group.\n"
-        "Once you have done so, you’ll unlock full access!"
-    )
-    keyboard = [[InlineKeyboardButton("📩 Invite Friends", url=f"https://t.me/share/url?url=Join+our+group!&text=Check+out+this+amazing+group!")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    invited_count = len(invites[user_id]["invited"])
 
-    await update.message.reply_text(text, reply_markup=reply_markup)
-
-async def check_invites(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = str(update.effective_user.id)
-    count = invites.get(user_id, {}).get("invited", 0)
-
-    if count >= 3:
-        await update.message.reply_text("✅ You have already invited 3 or more friends. You’re good to go!")
+    if invited_count >= 3:
+        text = f"✅ Hai @{user_name}! Terima kasih sebab dah jemput 3 orang kawan 🎉\n\nKau dah boleh guna semua fungsi dalam kumpulan {GROUP_NAME} 😎"
+        await update.message.reply_text(text)
     else:
-        await update.message.reply_text(f"👥 You’ve invited {count}/3 friends. Invite more to unlock access!")
+        remaining = 3 - invited_count
+        text = (
+            f"👋 Selamat datang @{user_name}!\n\n"
+            f"Untuk aktifkan akaun kau dalam kumpulan {GROUP_NAME}, kau kena jemput {remaining} lagi kawan 😍\n\n"
+            "Klik butang bawah ni untuk jemput 👇"
+        )
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    "💌 Jemput Kawan Sekarang",
+                    url=f"https://t.me/share/url?url=Join+{GROUP_NAME}+dan+dapatkan+ganjaran+menarik%21",
+                )
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text(text, reply_markup=reply_markup)
 
-async def add_invite(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if len(context.args) != 1:
-        await update.message.reply_text("Usage: /addinvite <user_id>")
+# ==============================
+# INVITE CHECKER
+# ==============================
+async def check_invite(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    user_id = str(user.id)
+
+    if user_id not in invites:
+        invites[user_id] = {"invited": []}
+        save_invites(invites)
+
+    invited_count = len(invites[user_id]["invited"])
+
+    if invited_count >= 3:
+        text = f"🎉 @{user.first_name}, kau dah berjaya jemput 3 kawan! Terima kasih sebab support 🙌"
+        await update.message.reply_text(text)
+    else:
+        remaining = 3 - invited_count
+        text = f"😅 @{user.first_name}, kau baru jemput {invited_count} orang.\nKena jemput {remaining} lagi untuk lengkapkan misi 💪"
+        keyboard = [
+            [
+                InlineKeyboardButton(
+                    "💌 Jemput Lagi",
+                    url=f"https://t.me/share/url?url=Join+{GROUP_NAME}+dan+support+komuniti+ni%21",
+                )
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text(text, reply_markup=reply_markup)
+
+# ==============================
+# ADD FRIEND (admin only)
+# ==============================
+async def add_friend(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if len(context.args) < 2:
+        await update.message.reply_text("❌ Guna format: /addfriend <user_id> <invited_user_id>")
         return
 
-    user_id = context.args[0]
-    if user_id not in invites:
-        invites[user_id] = {"invited": 1}
+    inviter = context.args[0]
+    invited = context.args[1]
+
+    if inviter not in invites:
+        invites[inviter] = {"invited": []}
+
+    if invited not in invites[inviter]["invited"]:
+        invites[inviter]["invited"].append(invited)
+        save_invites(invites)
+        await update.message.reply_text(f"✅ User {invited} dah ditambah dalam senarai jemputan {inviter}!")
     else:
-        invites[user_id]["invited"] += 1
-    save_invites(invites)
+        await update.message.reply_text(f"⚠️ User {invited} dah pernah dijemput oleh {inviter} sebelum ni.")
 
-    await update.message.reply_text(f"✅ Added 1 invite to user {user_id}. Total: {invites[user_id]['invited']}")
-
-async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
-    logger.error(msg="Exception while handling update:", exc_info=context.error)
-
+# ==============================
+# MAIN
+# ==============================
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("check", check_invites))
-    app.add_handler(CommandHandler("addinvite", add_invite))
-    app.add_error_handler(error_handler)
+    app.add_handler(CommandHandler("check", check_invite))
+    app.add_handler(CommandHandler("addfriend", add_friend))
 
+    print("✅ Bot is running...")
     app.run_polling()
 
 if __name__ == "__main__":
     main()
+
 
