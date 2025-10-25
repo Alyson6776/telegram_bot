@@ -19,6 +19,7 @@ import os
 # ==============================
 BOT_TOKEN = "7650403137:AAF5m8TXWpApivJVSwsX7tX1YkNXlB8g09A"
 INVITE_FILE = "invites.json"
+WARN_FILE = "warnings.json"
 GROUP_NAME = "🧧Kaki free credit🧧"
 
 # ==============================
@@ -30,91 +31,80 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ==============================
-# LOAD INVITE DATA
+# DATA LOADERS
 # ==============================
-def load_invites():
-    if os.path.exists(INVITE_FILE):
-        with open(INVITE_FILE, "r") as f:
+def load_json(filename):
+    if os.path.exists(filename):
+        with open(filename, "r") as f:
             return json.load(f)
     return {}
 
-def save_invites(data):
-    with open(INVITE_FILE, "w") as f:
+def save_json(filename, data):
+    with open(filename, "w") as f:
         json.dump(data, f, indent=4)
 
-invites = load_invites()
+invites = load_json(INVITE_FILE)
+warnings = load_json(WARN_FILE)
 
 # ==============================
-# START COMMAND
+# BAD WORDS & EMOJI LIST
+# ==============================
+BAD_WORDS = [
+    # English
+    "fuck", "shit", "bitch", "asshole", "dick", "pussy", "fucker", "bastard",
+    "cunt", "motherfucker", "whore", "slut", "cock", "porn", "sex", "nigger",
+    # Malay
+    "babi", "anjing", "sial", "bodoh", "bangang", "pukimak", "kote", "burit",
+    "pepek", "konek", "sundal", "pelacur", "lancap", "jubo", "puki", "mak kau",
+    # Emoji-based
+    "🍆", "💦", "🖕", "🍑", "👅", "😈", "🔞", "🤤"
+]
+
+# ==============================
+# WELCOME NEW USER
 # ==============================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     user_id = str(user.id)
-    user_name = user.first_name or "kawan"
+    username = user.first_name or "kawan"
 
     if user_id not in invites:
         invites[user_id] = {"invited": []}
-        save_invites(invites)
+        save_json(INVITE_FILE, invites)
 
     invited_count = len(invites[user_id]["invited"])
 
     if invited_count >= 3:
-        text = f"✅ Hai @{user_name}! Terima kasih sebab dah jemput 3 orang kawan 🎉\n\nKau dah boleh guna semua fungsi dalam kumpulan {GROUP_NAME} 😎"
-        await update.message.reply_text(text)
+        msg = (
+            f"✅ Hai @{username}! Kau memang legend 🔥\n"
+            f"Kau dah jemput 3 orang kawan masuk {GROUP_NAME} 🎉\n"
+            "Sekarang kau boleh enjoy semua content tanpa limit 💪"
+        )
+        await update.message.reply_text(msg)
     else:
-        remaining = 3 - invited_count
-        text = (
-            f"👋 Selamat datang @{user_name}!\n\n"
-            f"Untuk aktifkan akaun kau dalam kumpulan {GROUP_NAME}, kau kena jemput {remaining} lagi kawan 😍\n\n"
-            "Klik butang bawah ni untuk jemput 👇"
+        remain = 3 - invited_count
+        msg = (
+            f"👋 Selamat datang @{username}!\n\n"
+            f"Untuk aktifkan akaun kau dalam {GROUP_NAME}, kau perlu jemput **{remain} lagi kawan** 💌\n"
+            "Senang je — tekan butang bawah ni untuk terus share group ni ke Telegram 📲"
         )
         keyboard = [
             [
                 InlineKeyboardButton(
                     "💌 Jemput Kawan Sekarang",
-                    url=f"https://t.me/share/url?url=Join+{GROUP_NAME}+dan+dapatkan+ganjaran+menarik%21",
+                    url=f"https://t.me/share/url?url=Join+{GROUP_NAME}+dan+dapatkan+free+credit%21",
                 )
             ]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text(text, reply_markup=reply_markup)
+        await update.message.reply_text(msg, reply_markup=reply_markup)
 
 # ==============================
-# INVITE CHECKER
-# ==============================
-async def check_invite(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    user_id = str(user.id)
-
-    if user_id not in invites:
-        invites[user_id] = {"invited": []}
-        save_invites(invites)
-
-    invited_count = len(invites[user_id]["invited"])
-
-    if invited_count >= 3:
-        text = f"🎉 @{user.first_name}, kau dah berjaya jemput 3 kawan! Terima kasih sebab support 🙌"
-        await update.message.reply_text(text)
-    else:
-        remaining = 3 - invited_count
-        text = f"😅 @{user.first_name}, kau baru jemput {invited_count} orang.\nKena jemput {remaining} lagi untuk lengkapkan misi 💪"
-        keyboard = [
-            [
-                InlineKeyboardButton(
-                    "💌 Jemput Lagi",
-                    url=f"https://t.me/share/url?url=Join+{GROUP_NAME}+dan+support+komuniti+ni%21",
-                )
-            ]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await update.message.reply_text(text, reply_markup=reply_markup)
-
-# ==============================
-# ADD FRIEND (admin only)
+# ADD FRIEND (for admin)
 # ==============================
 async def add_friend(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(context.args) < 2:
-        await update.message.reply_text("❌ Guna format: /addfriend <user_id> <invited_user_id>")
+        await update.message.reply_text("❌ Format salah: /addfriend <user_id> <invited_user_id>")
         return
 
     inviter = context.args[0]
@@ -125,25 +115,77 @@ async def add_friend(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if invited not in invites[inviter]["invited"]:
         invites[inviter]["invited"].append(invited)
-        save_invites(invites)
-        await update.message.reply_text(f"✅ User {invited} dah ditambah dalam senarai jemputan {inviter}!")
+        save_json(INVITE_FILE, invites)
+        await update.message.reply_text(f"✅ User {invited} dah masuk senarai jemputan {inviter} 💪")
     else:
         await update.message.reply_text(f"⚠️ User {invited} dah pernah dijemput oleh {inviter} sebelum ni.")
 
 # ==============================
-# MAIN
+# BAD WORD FILTER
+# ==============================
+async def filter_bad_words(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    text = update.message.text.lower()
+
+    if any(bad in text for bad in BAD_WORDS):
+        user_id = str(user.id)
+        username = user.first_name or "user"
+
+        warnings[user_id] = warnings.get(user_id, 0) + 1
+        save_json(WARN_FILE, warnings)
+
+        if warnings[user_id] == 1:
+            await update.message.reply_text(
+                f"⚠️ @{username}, tolong jaga bahasa sikit ya 😅 (Amaran pertama)"
+            )
+        elif warnings[user_id] == 2:
+            await update.message.reply_text(
+                f"🚨 @{username}, ni amaran **kedua**! Jangan guna bahasa kasar lagi 😠"
+            )
+        else:
+            await update.message.reply_text(
+                f"❌ @{username} dah diberi 3 amaran. Kau akan dikeluarkan dari group 😔"
+            )
+            try:
+                await context.bot.ban_chat_member(update.message.chat_id, user.id)
+            except Exception as e:
+                print("Error removing user:", e)
+
+# ==============================
+# CHECK INVITE STATUS
+# ==============================
+async def check_invite(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.effective_user
+    user_id = str(user.id)
+    invited_count = len(invites.get(user_id, {"invited": []})["invited"])
+
+    if invited_count >= 3:
+        msg = (
+            f"🎉 @{user.first_name}, mantap bro! Kau dah jemput 3 orang 💯\n"
+            "Sekarang kau bebas dalam group ni 🔥"
+        )
+    else:
+        remain = 3 - invited_count
+        msg = (
+            f"😅 @{user.first_name}, kau baru jemput {invited_count} orang.\n"
+            f"Kena jemput {remain} lagi untuk cukup 3 💪"
+        )
+
+    await update.message.reply_text(msg)
+
+# ==============================
+# MAIN FUNCTION
 # ==============================
 def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("check", check_invite))
     app.add_handler(CommandHandler("addfriend", add_friend))
+    app.add_handler(CommandHandler("check", check_invite))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, filter_bad_words))
 
-    print("✅ Bot is running...")
+    print("✅ Bot sedang beroperasi 24 jam tanpa henti...")
     app.run_polling()
 
 if __name__ == "__main__":
     main()
-
-
