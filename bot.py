@@ -8,18 +8,23 @@ from threading import Thread
 # === ✅ Bot Settings ===
 BOT_TOKEN = "7650403137:AAF5m8TXWpApivJVSwsX7tX1YkNXlB8g09A"
 GROUP_NAME = "🧧Kaki free credit🧧"
+ADMIN_ID = 123456789  # ⚠️ Gantikan dengan Telegram ID admin kamu
 INVITES_FILE = "invites.json"
+VIOLATION_FILE = "violations.json"
 
-# === ✅ Load or create data ===
-if os.path.exists(INVITES_FILE):
-    with open(INVITES_FILE, "r") as f:
-        invites = json.load(f)
-else:
-    invites = {}
+# === ✅ Load data files ===
+def load_json(filename):
+    if os.path.exists(filename):
+        with open(filename, "r") as f:
+            return json.load(f)
+    return {}
 
-def save_invites():
-    with open(INVITES_FILE, "w") as f:
-        json.dump(invites, f, indent=4)
+invites = load_json(INVITES_FILE)
+violations = load_json(VIOLATION_FILE)
+
+def save_json(data, filename):
+    with open(filename, "w") as f:
+        json.dump(data, f, indent=4)
 
 # === 🚫 Banned words (Malay + English + Emoji) ===
 BANNED_WORDS = [
@@ -40,8 +45,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = f"@{user.username}" if user.username else user.first_name
 
     if user_id not in invites:
-        invites[user_id] = {"count": 0, "warned": False}
-        save_invites()
+        invites[user_id] = {"count": 0}
+        save_json(invites, INVITES_FILE)
 
     if invites[user_id]["count"] < 3:
         keyboard = [[InlineKeyboardButton("📩 Jemput 3 Kawan Sekarang!", callback_data="invite_friends")]]
@@ -75,38 +80,47 @@ async def track_invites(update: Update, context: ContextTypes.DEFAULT_TYPE):
     added_count = len(update.message.new_chat_members)
 
     if inviter_id not in invites:
-        invites[inviter_id] = {"count": 0, "warned": False}
+        invites[inviter_id] = {"count": 0}
 
     invites[inviter_id]["count"] += added_count
-    save_invites()
+    save_json(invites, INVITES_FILE)
 
     await update.message.reply_text(
         f"🎉 Terima kasih {inviter_name} kerana jemput {added_count} kawan!\n"
         f"Jumlah terkini: **{invites[inviter_id]['count']}/3** ✅"
     )
 
-# === 💬 Message filtering & response ===
+# === 💬 Handle all messages (filter + monitor) ===
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.lower()
     user = update.effective_user
     user_id = str(user.id)
-    user_name = user.first_name
+    user_name = f"@{user.username}" if user.username else user.first_name
 
-    # 🔞 Detect bad words
+    # 🔞 Detect banned words
     if any(word in text for word in BANNED_WORDS):
-        if user_id not in invites:
-            invites[user_id] = {"count": 0, "warned": False}
-        if not invites[user_id]["warned"]:
-            invites[user_id]["warned"] = True
-            save_invites()
-            await update.message.reply_text(f"⚠️ @{user_name}, tolong jaga bahasa kamu. Ini amaran pertama 🙏")
-        else:
-            await update.message.reply_text(f"🚫 @{user_name}, kamu dah diberi amaran. Admin akan pantau mesej kamu.")
-        return
+        count = violations.get(user_id, 0) + 1
+        violations[user_id] = count
+        save_json(violations, VIOLATION_FILE)
 
-    # 👋 Friendly greetings
-    if "hai" in text or "hello" in text:
-        await update.message.reply_text(f"Halo @{user_name}! 👋 Selamat datang ke {GROUP_NAME}!")
+        # Send warning privately
+        try:
+            if count == 1:
+                await context.bot.send_message(chat_id=user.id, text=f"⚠️ {user_name}, tolong jaga bahasa kamu. Ini amaran pertama 🙏")
+            elif count == 2:
+                await context.bot.send_message(chat_id=user.id, text=f"⚠️ {user_name}, ini amaran kedua. Ulang lagi, kamu akan dikeluarkan 🚨")
+            elif count >= 3:
+                await context.bot.send_message(chat_id=user.id, text=f"🚫 {user_name}, kamu telah melanggar peraturan 3 kali. Kamu akan dikeluarkan daripada {GROUP_NAME}.")
+                await context.bot.ban_chat_member(chat_id=update.message.chat_id, user_id=user.id)
+
+                # Notify admin privately
+                await context.bot.send_message(
+                    chat_id=ADMIN_ID,
+                    text=f"🚨 {user_name} (ID: {user.id}) telah dikeluarkan dari {GROUP_NAME} kerana melanggar peraturan 3 kali."
+                )
+        except Exception as e:
+            logging.warning(f"Gagal hantar mesej: {e}")
+        return
 
 # === 📩 Button handler ===
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -130,7 +144,7 @@ async def main():
     print("🤖 Bot sedang berjalan di Replit 24 jam...")
     await app.run_polling()
 
-# === 💓 Heartbeat (Flask server for uptime) ===
+# === 💓 Heartbeat for 24/7 uptime ===
 app_flask = Flask('')
 
 @app_flask.route('/')
@@ -140,9 +154,6 @@ def home():
 def run_flask():
     app_flask.run(host='0.0.0.0', port=8080)
 
-# === 🧩 Run everything ===
 if __name__ == "__main__":
     Thread(target=run_flask).start()
     asyncio.run(main())
-
-
