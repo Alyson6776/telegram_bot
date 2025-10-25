@@ -1,14 +1,16 @@
 import logging
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ChatMemberUpdated
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ChatMemberHandler, filters, CallbackQueryHandler, ContextTypes
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, filters, CallbackQueryHandler, ContextTypes
 import json, os, asyncio
+from flask import Flask
+from threading import Thread
 
-# === ✅ 基本设定 ===
+# === ✅ Bot Settings ===
 BOT_TOKEN = "7650403137:AAF5m8TXWpApivJVSwsX7tX1YkNXlB8g09A"
 GROUP_NAME = "🧧Kaki free credit🧧"
 INVITES_FILE = "invites.json"
 
-# === ✅ 初始化数据 ===
+# === ✅ Load or create data ===
 if os.path.exists(INVITES_FILE):
     with open(INVITES_FILE, "r") as f:
         invites = json.load(f)
@@ -19,19 +21,19 @@ def save_invites():
     with open(INVITES_FILE, "w") as f:
         json.dump(invites, f, indent=4)
 
-# === ✅ 禁词清单（马来文 + 英文 + emoji）===
+# === 🚫 Banned words (Malay + English + Emoji) ===
 BANNED_WORDS = [
     "fuck","babi","sial","anjing","kote","puki","bangsat","bodoh",
     "stupid","wtf","idiot","sundal","fucker","🖕","🖕🏻","🖕🏼","🖕🏽","💩","🤬"
 ]
 
-# === ✅ 日志设定 ===
+# === 🧠 Logging setup ===
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     level=logging.INFO
 )
 
-# === ✅ /start 指令 ===
+# === 🎯 /start command ===
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     user_id = str(user.id)
@@ -46,8 +48,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         message = (
             f"👋 Hai {username}!\n\n"
             f"Selamat datang ke {GROUP_NAME} 🎉\n"
-            "Untuk mula, jemput 3 orang kawan masuk ke group ni dulu 😎\n"
-            "Bila cukup **3 orang**, kamu akan unlock semua feature 💥"
+            "Untuk mula, jemput **3 orang kawan** masuk ke group ni 😎\n"
+            "Bila cukup, kamu akan unlock semua feature 💥"
         )
         reply_markup = InlineKeyboardMarkup(keyboard)
     else:
@@ -56,64 +58,66 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(message, reply_markup=reply_markup)
 
-# === ✅ 邀请统计 ===
+# === 📊 /myinvites command ===
 async def myinvites(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
     count = invites.get(user_id, {}).get("count", 0)
     await update.message.reply_text(f"📊 Kamu dah jemput **{count}/3** kawan setakat ni.")
 
-# === ✅ 检测新成员进群（自动加分邀请）===
+# === 🧍 Track invited members ===
 async def track_invites(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    new_members = update.message.new_chat_members
-    inviter_id = update.message.from_user.id
-    inviter_name = f"@{update.message.from_user.username}" if update.message.from_user.username else update.message.from_user.first_name
-
-    if not new_members:
+    if not update.message.new_chat_members:
         return
 
-    inviter_id_str = str(inviter_id)
-    if inviter_id_str not in invites:
-        invites[inviter_id_str] = {"count": 0, "warned": False}
+    inviter = update.message.from_user
+    inviter_id = str(inviter.id)
+    inviter_name = f"@{inviter.username}" if inviter.username else inviter.first_name
+    added_count = len(update.message.new_chat_members)
 
-    invites[inviter_id_str]["count"] += len(new_members)
+    if inviter_id not in invites:
+        invites[inviter_id] = {"count": 0, "warned": False}
+
+    invites[inviter_id]["count"] += added_count
     save_invites()
 
     await update.message.reply_text(
-        f"🎉 Terima kasih {inviter_name} kerana jemput {len(new_members)} kawan! "
-        f"Jumlah terkini: **{invites[inviter_id_str]['count']}/3** ✅"
+        f"🎉 Terima kasih {inviter_name} kerana jemput {added_count} kawan!\n"
+        f"Jumlah terkini: **{invites[inviter_id]['count']}/3** ✅"
     )
 
-# === ✅ 文字检测（禁词 + 欢迎互动）===
+# === 💬 Message filtering & response ===
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = str(update.effective_user.id)
-    user_name = update.effective_user.first_name
     text = update.message.text.lower()
+    user = update.effective_user
+    user_id = str(user.id)
+    user_name = user.first_name
 
+    # 🔞 Detect bad words
     if any(word in text for word in BANNED_WORDS):
         if user_id not in invites:
             invites[user_id] = {"count": 0, "warned": False}
         if not invites[user_id]["warned"]:
             invites[user_id]["warned"] = True
             save_invites()
-            await update.message.reply_text(f"⚠️ @{user_name}, tolong jaga bahasa ya. Ini amaran pertama.")
+            await update.message.reply_text(f"⚠️ @{user_name}, tolong jaga bahasa kamu. Ini amaran pertama 🙏")
         else:
             await update.message.reply_text(f"🚫 @{user_name}, kamu dah diberi amaran. Admin akan pantau mesej kamu.")
         return
 
+    # 👋 Friendly greetings
     if "hai" in text or "hello" in text:
         await update.message.reply_text(f"Halo @{user_name}! 👋 Selamat datang ke {GROUP_NAME}!")
 
-# === ✅ 按钮动作 ===
+# === 📩 Button handler ===
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-
     await query.message.reply_text(
         "📨 Hantar link ni kepada 3 kawan kamu sekarang:\n"
         "👉 https://t.me/share/url?url=Join+group+ni+dan+dapat+free+rewards!"
     )
 
-# === ✅ 机器人主程序 ===
+# === 🚀 Main bot ===
 async def main():
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
@@ -123,9 +127,22 @@ async def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(CallbackQueryHandler(button))
 
-    print("🤖 Bot sedang berjalan di Replit secara 24 jam...")
+    print("🤖 Bot sedang berjalan di Replit 24 jam...")
     await app.run_polling()
 
+# === 💓 Heartbeat (Flask server for uptime) ===
+app_flask = Flask('')
+
+@app_flask.route('/')
+def home():
+    return "Bot is alive! 🟢"
+
+def run_flask():
+    app_flask.run(host='0.0.0.0', port=8080)
+
+# === 🧩 Run everything ===
 if __name__ == "__main__":
+    Thread(target=run_flask).start()
     asyncio.run(main())
+
 
